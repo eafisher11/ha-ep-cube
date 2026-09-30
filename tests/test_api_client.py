@@ -502,3 +502,51 @@ class TestGetStats:
         assert calls["n"] == 2
         assert reauth.await_count == 1
         assert result["gridelectricityfrom"] == 1.0
+
+
+# ----------------------------------------------------------------------
+# EV charger fields (homeDeviceInfo evPower / evElectricity / hasEv)
+# ----------------------------------------------------------------------
+class TestEvFields:
+    async def test_ev_fields_parsed_when_charger_present(
+        self, aioclient_mock, client_factory, home_device_info, get_switch_mode
+    ):
+        # Shape taken from a live US cube (2026-09-30): float power values
+        # and a native-bool hasEv.
+        info = {
+            **home_device_info,
+            "hasEv": True,
+            "evPower": 72.0,
+            "evElectricity": 6.4,
+        }
+        aioclient_mock.get(_url_re("/api/device/homeDeviceInfo"), json=_envelope(info))
+        aioclient_mock.get(_url_re("/api/device/getSwitchMode"), json=_envelope(get_switch_mode))
+
+        status = await client_factory().get_status()
+
+        assert status.has_ev is True
+        assert status.ev_power_w == 720.0   # 0.01 kW wire units, same as solarPower
+        assert status.ev_today_kwh == 6.4
+
+    async def test_ev_absent_defaults_to_no_charger(
+        self, aioclient_mock, client_factory, home_device_info, get_switch_mode
+    ):
+        # EU fixture has evPower/evElectricity zeros and no hasEv key.
+        aioclient_mock.get(_url_re("/api/device/homeDeviceInfo"), json=_envelope(home_device_info))
+        aioclient_mock.get(_url_re("/api/device/getSwitchMode"), json=_envelope(get_switch_mode))
+
+        status = await client_factory().get_status()
+
+        assert status.has_ev is False
+        assert status.ev_power_w == 0.0
+        assert status.ev_today_kwh == 0.0
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [(True, True), (False, False), ("1", True), ("0", False),
+         ("true", True), (1, True), (None, False), ("", False)],
+    )
+    def test_has_ev_encodings(self, raw, expected):
+        from custom_components.ep_cube.api import _truthy
+
+        assert _truthy(raw) is expected

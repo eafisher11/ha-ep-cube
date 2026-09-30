@@ -133,6 +133,15 @@ class DeviceStatus:
     off_grid_seconds: int          # offGridPowerSupplyTime — diagnostic; lifetime seconds on backup
     battery_charge_today_kwh: float    # client-side delta-tracker; resets at midnight local
     battery_discharge_today_kwh: float # client-side delta-tracker; resets at midnight local
+    # EV charger channels from homeDeviceInfo. `hasEv` gates whether the EV
+    # sensors are registered at all, so installs without a charger don't get
+    # permanently-zero entities. evPower uses the same 0.01 kW wire units as
+    # the other power fields (confirmed on a US cube, 2026-09-30); evElectricity
+    # is today's kWh, reset by the cube at its local midnight. Defaults keep
+    # older callers (and payloads without these keys) working unchanged.
+    has_ev: bool = False
+    ev_power_w: float = 0.0
+    ev_today_kwh: float = 0.0
 
 
 # ----------------------------------------------------------------------
@@ -159,6 +168,16 @@ def _kwh_str_to_float(value: Any) -> float:
     if value is None or value == "":
         return 0.0
     return float(value)
+
+
+def _truthy(value: Any) -> bool:
+    """Coerce the cube's mixed boolean encodings (True, "1", 1, "true") to
+    bool. Anything absent or unrecognised is False."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes")
 
 
 def _capacity_string_to_kwh(value: Any) -> float:
@@ -534,6 +553,9 @@ class EPCubeClient:
             off_grid_seconds=int(info.get("offGridPowerSupplyTime", 0) or 0),
             battery_charge_today_kwh=self._battery_charge_today_kwh,
             battery_discharge_today_kwh=self._battery_discharge_today_kwh,
+            has_ev=_truthy(info.get("hasEv")),
+            ev_power_w=_power_to_w(info.get("evPower")),
+            ev_today_kwh=_kwh_str_to_float(info.get("evElectricity")),
         )
 
     async def get_switch_mode(self) -> dict[str, Any]:

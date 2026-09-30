@@ -369,6 +369,33 @@ SENSORS: tuple[EPCubeSensorDescription, ...] = (
 )
 
 
+# EV charger sensors. Registered only when homeDeviceInfo reports
+# `hasEv: true` (see async_setup_entry), so installs without a charger don't
+# carry two permanently-zero entities. Both read from the same 60 s poll.
+EV_SENSORS: tuple[EPCubeSensorDescription, ...] = (
+    EPCubeSensorDescription(
+        key="ev_power",
+        translation_key="ev_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda s: s.ev_power_w,
+    ),
+    # Cube-side daily total, reset at the cube's local midnight.
+    # TOTAL_INCREASING treats that drop as a meter reset, so this can be
+    # added to the Energy Dashboard as an individual device.
+    EPCubeSensorDescription(
+        key="ev_today",
+        translation_key="ev_today",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=2,
+        value_fn=lambda s: s.ev_today_kwh,
+    ),
+)
+
+
 # ----------------------------------------------------------------------
 # Stats sensors (Phase 4.2). Fed by EPCubeStatsCoordinator which polls the
 # cube's queryDataElectricityV2 endpoint on a 5-min cadence for today + slower
@@ -707,6 +734,12 @@ async def async_setup_entry(
     entities.extend(
         EPCubeSensor(coordinator, entry.entry_id, desc) for desc in SENSORS
     )
+    # EV sensors only when the cube reports a charger. The first refresh has
+    # already succeeded by the time platforms are set up, so data is present.
+    if coordinator.data is not None and coordinator.data.has_ev:
+        entities.extend(
+            EPCubeSensor(coordinator, entry.entry_id, desc) for desc in EV_SENSORS
+        )
     entities.extend(
         EPCubeStatsSensor(stats_coordinator, entry.entry_id, desc)
         for desc in STATS_SENSORS

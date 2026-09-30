@@ -44,6 +44,8 @@
       "reserve_soc": {"name": "Reserve SoC"},
       "solar_today": {"name": "Solar today"},
       "backup_today": {"name": "Backup loads today"},
+      "ev_power": {"name": "EV charger power"},
+      "ev_today": {"name": "EV charger today"},
       "self_sufficiency_pct": {"name": "Self-sufficiency"},
       "solar_dc_today": {"name": "Solar DC today"},
       "solar_ac_today": {"name": "Solar AC today"},

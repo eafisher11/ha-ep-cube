@@ -310,3 +310,67 @@ class TestStaleEntityPurge:
 
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
+
+
+class TestEvSensors:
+    """EV sensors register only when the cube reports an EV charger."""
+
+    @pytest.fixture(autouse=True)
+    def filter_aiohttp_shutdown_thread(self, monkeypatch):
+        import threading
+
+        orig = threading.enumerate
+
+        def _filtered():
+            return [t for t in orig() if "_run_safe_shutdown_loop" not in t.name]
+
+        monkeypatch.setattr(threading, "enumerate", _filtered)
+
+    @staticmethod
+    def _sensor_keys(hass, entry) -> set[str]:
+        registry = er.async_get(hass)
+        prefix = f"{entry.entry_id}_"
+        return {
+            e.unique_id[len(prefix):]
+            for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+            if e.domain == "sensor" and e.unique_id.startswith(prefix)
+        }
+
+    async def test_no_ev_sensors_without_charger(self, hass, setup_integration):
+        keys = self._sensor_keys(hass, setup_integration)
+        assert "ev_power" not in keys
+        assert "ev_today" not in keys
+
+    async def test_ev_sensors_registered_with_charger(
+        self, hass, mock_config_entry, fake_client,
+    ):
+        import dataclasses
+
+        base = fake_client.get_status.return_value
+        fake_client.get_status.return_value = dataclasses.replace(
+            base, has_ev=True, ev_power_w=7200.0, ev_today_kwh=6.4,
+        )
+
+        entry = mock_config_entry()
+        entry.add_to_hass(hass)
+        with (
+            patch("custom_components.ep_cube.EPCubeClient", return_value=fake_client),
+            patch(
+                "custom_components.ep_cube.make_reauth_callback",
+                return_value=AsyncMock(return_value=None),
+            ),
+        ):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+        keys = self._sensor_keys(hass, entry)
+        assert {"ev_power", "ev_today"} <= keys
+
+        registry = er.async_get(hass)
+        power_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_ev_power")
+        today_id = registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_ev_today")
+        assert float(hass.states.get(power_id).state) == 7200.0
+        assert float(hass.states.get(today_id).state) == 6.4
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
