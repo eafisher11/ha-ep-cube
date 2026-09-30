@@ -33,7 +33,7 @@
 
 ## ✨ What You Get
 
-- 🔋 **41 sensors + 5 control entities** surfacing every cube state — SoC, power flow, instant KPIs, mode, reserves, daily / yesterday / monthly / yearly energy, self-consumption + sufficiency %, lifetime stats
+- 🔋 **41 sensors + 5 control entities** (plus EV charger power + EV energy today when the cube reports an EV charger) surfacing every cube state — SoC, power flow, instant KPIs, mode, reserves, daily / yesterday / monthly / yearly energy, self-consumption + sufficiency %, lifetime stats
 - ⚡ **Predbat shim** translates rate-based commands into the cube's TOU model — full **Octopus Agile** optimisation, no manual scheduling
 - 🎨 **Drop-in animated dashboard** mirroring the EP Cube mobile app — power flow, mode picker, mode-specific control cards
 - 🌍 **Multi-region** — EU live, US/JP/Other supported via config-flow region picker

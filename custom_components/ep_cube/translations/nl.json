@@ -44,6 +44,8 @@
       "reserve_soc": {"name": "Reserve-laadtoestand"},
       "solar_today": {"name": "Zon vandaag"},
       "backup_today": {"name": "Back-up-verbruikers vandaag"},
+      "ev_power": {"name": "Laadpaalvermogen"},
+      "ev_today": {"name": "Laadpaal vandaag"},
       "self_sufficiency_pct": {"name": "Zelfvoorziening"},
       "solar_dc_today": {"name": "Zon DC vandaag"},
       "solar_ac_today": {"name": "Zon AC vandaag"},
