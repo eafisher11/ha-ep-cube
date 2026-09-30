@@ -527,6 +527,31 @@ class TestEvFields:
         assert status.has_ev is True
         assert status.ev_power_w == 720.0   # 0.01 kW wire units, same as solarPower
         assert status.ev_today_kwh == 6.4
+        # EV draw is part of load: 800 W house + 720 W EV.
+        assert status.load_power_w == 1520.0
+
+    async def test_load_and_battery_include_ev_draw(
+        self, aioclient_mock, client_factory, get_switch_mode
+    ):
+        # Live US cube reading taken mid-charge (2026-09-30 17:17 ET).
+        # backUpPower + evPower == smartHomePower (77 + 162 == 239).
+        info = {
+            "workStatus": "1", "batterySoc": 95, "batteryCurrentElectricity": 18.98,
+            "gridPower": 0.0, "solarPower": 41.0,
+            "backUpPower": 77.0, "nonBackUpPower": 0.0,
+            "evPower": 162.0, "evElectricity": 0.1, "hasEv": True,
+            "smartHomePower": 239.0, "batteryPower": 0,
+        }
+        aioclient_mock.get(_url_re("/api/device/homeDeviceInfo"), json=_envelope(info))
+        aioclient_mock.get(_url_re("/api/device/getSwitchMode"), json=_envelope(get_switch_mode))
+
+        status = await client_factory().get_status()
+
+        assert status.ev_power_w == 1620.0
+        assert status.load_power_w == 2390.0   # == smartHomePower × 10
+        # 410 W solar + 0 W grid − 2390 W load → battery discharging ~2 kW.
+        # (The cube's own batteryPower field reads 0 here, so it's not used.)
+        assert status.battery_power_w == -1980.0
 
     async def test_ev_absent_defaults_to_no_charger(
         self, aioclient_mock, client_factory, home_device_info, get_switch_mode
