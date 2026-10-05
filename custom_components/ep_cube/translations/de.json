@@ -44,6 +44,8 @@
       "reserve_soc": {"name": "Reserve-Ladezustand"},
       "solar_today": {"name": "Solar heute"},
       "backup_today": {"name": "Notstromverbraucher heute"},
+      "ev_power": {"name": "Wallbox-Leistung"},
+      "ev_today": {"name": "Wallbox heute"},
       "self_sufficiency_pct": {"name": "Autarkiegrad"},
       "solar_dc_today": {"name": "Solar DC heute"},
       "solar_ac_today": {"name": "Solar AC heute"},

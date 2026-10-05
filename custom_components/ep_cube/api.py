@@ -102,7 +102,7 @@ class DeviceStatus:
     battery_power_w: float   # derived: solar + grid - load; >0 charging, <0 discharging
     grid_power_w: float      # >0 import, <0 export (verified 2026-05-22: cube returned gridPower:"-17" → -170 W matched EP Cube app's export reading)
     solar_power_w: float
-    load_power_w: float      # backUpPower + nonBackUpPower
+    load_power_w: float      # backUpPower + nonBackUpPower + evPower
     operating_mode: str      # "self_consumption" | "time_of_use" | "backup"
     reserve_soc_pct: float   # per-mode reserve matching current workStatus
     allow_grid_charge: bool  # mirrors cube's allowChargingXiaGrid
@@ -139,6 +139,15 @@ class DeviceStatus:
     off_grid_seconds: int          # offGridPowerSupplyTime — diagnostic; lifetime seconds on backup
     battery_charge_today_kwh: float    # client-side delta-tracker; resets at midnight local
     battery_discharge_today_kwh: float # client-side delta-tracker; resets at midnight local
+    # EV charger channels from homeDeviceInfo. `hasEv` gates whether the EV
+    # sensors are registered at all, so installs without a charger don't get
+    # permanently-zero entities. evPower uses the same 0.01 kW wire units as
+    # the other power fields (confirmed on a US cube, 2026-09-30); evElectricity
+    # is today's kWh, reset by the cube at its local midnight. Defaults keep
+    # older callers (and payloads without these keys) working unchanged.
+    has_ev: bool = False
+    ev_power_w: float = 0.0
+    ev_today_kwh: float = 0.0
 
 
 # ----------------------------------------------------------------------
@@ -165,6 +174,16 @@ def _kwh_str_to_float(value: Any) -> float:
     if value is None or value == "":
         return 0.0
     return float(value)
+
+
+def _truthy(value: Any) -> bool:
+    """Coerce the cube's mixed boolean encodings (True, "1", 1, "true") to
+    bool. Anything absent or unrecognised is False."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes")
 
 
 def _capacity_string_to_kwh(value: Any) -> float:
@@ -468,7 +487,14 @@ class EPCubeClient:
         solar_w = _power_to_w(info.get("solarPower"))
         backup_w = _power_to_w(info.get("backUpPower"))
         nonbackup_w = _power_to_w(info.get("nonBackUpPower"))
-        load_w = backup_w + nonbackup_w
+        # EV charging is reported on its own channel, NOT inside backUpPower /
+        # nonBackUpPower. Verified on a US cube 2026-09-30: backUpPower:77 +
+        # evPower:162 == smartHomePower:239 (and the same for the kWh
+        # counters). Leaving it out under-reports load and makes the derived
+        # battery power look ~EV-draw too low while a car charges. Installs
+        # without a charger report evPower 0, so this is a no-op for them.
+        ev_w = _power_to_w(info.get("evPower"))
+        load_w = backup_w + nonbackup_w + ev_w
         grid_w = _power_to_w(info.get("gridPower"))
         # battery_power: power conservation. >0 = charging.
         battery_w = solar_w + grid_w - load_w
@@ -484,9 +510,9 @@ class EPCubeClient:
         # and we have no saved HAR to cross-check against.
         _LOGGER.debug(
             "homeDeviceInfo raw=%s | computed: solar_w=%.0f grid_w=%.0f "
-            "backup_w=%.0f nonbackup_w=%.0f load_w=%.0f battery_w=%.0f",
+            "backup_w=%.0f nonbackup_w=%.0f ev_w=%.0f load_w=%.0f battery_w=%.0f",
             {k: v for k, v in info.items() if not isinstance(v, (dict, list))},
-            solar_w, grid_w, backup_w, nonbackup_w, load_w, battery_w,
+            solar_w, grid_w, backup_w, nonbackup_w, ev_w, load_w, battery_w,
         )
         # Companion dump of the getSwitchMode fields that DeviceStatus depends
         # on (reserves + mode + grid-charge flag). homeDeviceInfo doesn't carry
@@ -544,6 +570,9 @@ class EPCubeClient:
             off_grid_seconds=int(info.get("offGridPowerSupplyTime", 0) or 0),
             battery_charge_today_kwh=self._battery_charge_today_kwh,
             battery_discharge_today_kwh=self._battery_discharge_today_kwh,
+            has_ev=_truthy(info.get("hasEv")),
+            ev_power_w=ev_w,
+            ev_today_kwh=_kwh_str_to_float(info.get("evElectricity")),
         )
 
     async def get_switch_mode(self) -> dict[str, Any]:

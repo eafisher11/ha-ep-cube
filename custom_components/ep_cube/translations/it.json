@@ -44,6 +44,8 @@
       "reserve_soc": {"name": "Riserva di carica"},
       "solar_today": {"name": "Solare oggi"},
       "backup_today": {"name": "Carichi backup oggi"},
+      "ev_power": {"name": "Potenza caricatore EV"},
+      "ev_today": {"name": "Caricatore EV oggi"},
       "self_sufficiency_pct": {"name": "Autosufficienza"},
       "solar_dc_today": {"name": "Solare DC oggi"},
       "solar_ac_today": {"name": "Solare AC oggi"},
