@@ -7,11 +7,13 @@ API jitter.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.ep_cube import api as api_mod
 from custom_components.ep_cube.api import EPCubeClient
 
 
@@ -86,7 +88,26 @@ class TestBatteryFlowTracker:
         # the delta from the anchored value (11.5 → 11.7 = +0.2) counts toward
         # the new day. Anchor was preserved across midnight.
         assert client._battery_charge_today_kwh == pytest.approx(0.2)
-        assert client._battery_flow_last_reset == date.today()
+        assert client._battery_flow_last_reset == api_mod._local_today()
+
+    def test_reset_follows_ha_timezone_not_os_clock(self, client, monkeypatch):
+        # 21:30 Eastern on Oct 5 is already Oct 6 in UTC. An OS clock in UTC
+        # would roll the counters here; HA's local date must not.
+        ny = ZoneInfo("America/New_York")
+        now = {"t": datetime(2026, 10, 5, 21, 30, tzinfo=ny)}
+        monkeypatch.setattr(api_mod.dt_util, "now", lambda *a, **k: now["t"])
+
+        client._battery_flow_last_reset = date(2026, 10, 5)
+        client._update_battery_flow(11.0)
+        client._update_battery_flow(10.5)        # -0.5 discharge
+        assert client._battery_discharge_today_kwh == pytest.approx(0.5)
+        assert client._battery_flow_last_reset == date(2026, 10, 5)
+
+        # Local midnight passes → reset, then the new delta counts.
+        now["t"] = datetime(2026, 10, 6, 0, 5, tzinfo=ny)
+        client._update_battery_flow(10.2)        # -0.3 discharge
+        assert client._battery_discharge_today_kwh == pytest.approx(0.3)
+        assert client._battery_flow_last_reset == date(2026, 10, 6)
 
     def test_exactly_threshold_counts(self, client):
         # Boundary check — the threshold is inclusive (>= and <=).

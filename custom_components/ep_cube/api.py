@@ -35,6 +35,7 @@ from datetime import date
 from typing import Any
 
 import aiohttp
+from homeassistant.util import dt as dt_util
 
 from .const import (
     EP_CUBE_PACK_KWH,
@@ -88,6 +89,11 @@ _DEFAULT_HEADERS = {
 # ----------------------------------------------------------------------
 # Data model exposed to coordinator / sensor.py — unchanged field names
 # ----------------------------------------------------------------------
+def _local_today() -> date:
+    """Today's date in Home Assistant's configured time zone."""
+    return dt_util.now().date()
+
+
 @dataclass(slots=True)
 class DeviceStatus:
     soc_pct: float
@@ -370,7 +376,7 @@ class EPCubeClient:
         self._battery_flow_last_kwh: float | None = None
         self._battery_charge_today_kwh: float = 0.0
         self._battery_discharge_today_kwh: float = 0.0
-        self._battery_flow_last_reset: date = date.today()
+        self._battery_flow_last_reset: date = _local_today()
 
     # ------------------------------------------------------------------
     # Identity
@@ -440,8 +446,12 @@ class EPCubeClient:
         """Delta-track batteryCurrentElectricity into daily charge/discharge
         accumulators. Reset at local midnight. First call after restart just
         anchors the reference value — no delta is counted (we don't know how
-        long since the last poll)."""
-        today = date.today()
+        long since the last poll).
+
+        "Midnight" is Home Assistant's configured time zone, not the OS clock:
+        HA containers often run with the system clock in UTC, which would
+        roll these counters at 8pm Eastern instead of local midnight."""
+        today = _local_today()
         if today != self._battery_flow_last_reset:
             self._battery_charge_today_kwh = 0.0
             self._battery_discharge_today_kwh = 0.0
