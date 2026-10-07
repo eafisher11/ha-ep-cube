@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.ep_cube.api import (
+    _battery_kwh_or_none,
     _capacity_string_to_kwh,
     _kwh_str_to_float,
     _power_to_w,
@@ -57,6 +58,21 @@ class TestKwhStrToFloat:
     @pytest.mark.parametrize("value", [None, ""])
     def test_empty_is_zero(self, value):
         assert _kwh_str_to_float(value) == 0.0
+
+
+class TestBatteryKwhOrNone:
+    @pytest.mark.parametrize(
+        ("wire", "expected"),
+        [(11.0, 11.0), ("18.98", 18.98), (0.4, 0.4)],
+    )
+    def test_real_readings_pass_through(self, wire, expected):
+        assert _battery_kwh_or_none(wire) == expected
+
+    @pytest.mark.parametrize("value", [None, "", 0, 0.0, "0", "0.0", -1, "n/a"])
+    def test_zero_missing_or_garbage_is_none(self, value):
+        # The cloud sends 0 / drops the field around midnight rollover —
+        # that must read as "no reading", never 0 kWh.
+        assert _battery_kwh_or_none(value) is None
 
 
 class TestCapacityStringToKwh:

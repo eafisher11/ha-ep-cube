@@ -6,11 +6,12 @@ correctly tagged (CONFIG for writables, DIAGNOSTIC for duplicates).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant import config_entries
-from homeassistant.const import EntityCategory
+from homeassistant.const import STATE_UNAVAILABLE, EntityCategory
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.ep_cube.const import DOMAIN
@@ -212,6 +213,35 @@ class TestSensorValues:
         assert float(state_for("battery_soc").state) == 55.0
         assert float(state_for("solar_power").state) == 1200.0
         assert float(state_for("earning_yesterday").state) == 1.23
+
+    async def test_battery_energy_unavailable_when_cube_sends_zero(
+        self, hass, setup_integration, fake_client
+    ):
+        # api.py maps a 0 / missing batteryCurrentElectricity to soc_kwh=None;
+        # the sensor must then report `unavailable`, not 0, and recover on
+        # the next good poll.
+        registry = er.async_get(hass)
+        entry = setup_integration
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_battery_soc_kwh"
+        )
+        coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+        good = fake_client.get_status.return_value
+        assert float(hass.states.get(entity_id).state) == 11.0
+
+        fake_client.get_status.return_value = replace(good, soc_kwh=None)
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
+        # Neighbouring sensors are unaffected.
+        assert float(hass.states.get(
+            registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_battery_soc")
+        ).state) == 55.0
+
+        fake_client.get_status.return_value = good
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert float(hass.states.get(entity_id).state) == 11.0
 
 
 class TestStaleEntityPurge:
