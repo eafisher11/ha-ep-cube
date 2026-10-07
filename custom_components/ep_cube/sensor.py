@@ -31,6 +31,10 @@ from .coordinator import EPCubeCoordinator, EPCubeStatsCoordinator
 @dataclass(frozen=True, kw_only=True)
 class EPCubeSensorDescription(SensorEntityDescription):
     value_fn: Callable[[DeviceStatus], float | str | None]
+    # Optional per-sensor availability check. When it returns False the
+    # entity reports `unavailable` instead of a value, so HA's recorder and
+    # long-term statistics skip that poll rather than storing a bogus number.
+    available_fn: Callable[[DeviceStatus], bool] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -116,6 +120,8 @@ SENSORS: tuple[EPCubeSensorDescription, ...] = (
         # default 2dp implies misleading 10 Wh precision.
         suggested_display_precision=1,
         value_fn=lambda s: s.soc_kwh,
+        # Cube sends 0 around its midnight rollover; show unavailable, not 0.
+        available_fn=lambda s: s.soc_kwh is not None,
     ),
     EPCubeSensorDescription(
         key="battery_capacity_kwh",
@@ -789,6 +795,15 @@ class EPCubeSensor(CoordinatorEntity[EPCubeCoordinator], RestoreSensor):
         await super().async_added_to_hass()
         if (last := await self.async_get_last_sensor_data()) is not None:
             self._restored_value = last.native_value
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        check = self.entity_description.available_fn
+        if check is None or self.coordinator.data is None:
+            return True
+        return check(self.coordinator.data)
 
     @property
     def native_value(self) -> float | str | None:

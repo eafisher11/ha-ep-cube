@@ -329,6 +329,40 @@ class TestGetStatus:
         assert status.battery_charge_today_kwh == 0.0
         assert status.battery_discharge_today_kwh == 0.0
 
+    async def test_zero_battery_reading_is_unavailable_and_skips_tracker(
+        self, aioclient_mock, client_factory, home_device_info, get_switch_mode
+    ):
+        # Midnight rollover: the cloud reports batteryCurrentElectricity=0
+        # for a poll. soc_kwh must be None (sensor unavailable), and the
+        # charge/discharge tracker must not book a phantom full discharge
+        # followed by a phantom full recharge.
+        client = client_factory()
+
+        async def poll(battery_kwh):
+            aioclient_mock.clear_requests()
+            aioclient_mock.get(
+                _url_re("/api/device/homeDeviceInfo"),
+                json=_envelope({**home_device_info, "batteryCurrentElectricity": battery_kwh}),
+            )
+            aioclient_mock.get(
+                _url_re("/api/device/getSwitchMode"),
+                json=_envelope(get_switch_mode),
+            )
+            return await client.get_status()
+
+        status = await poll(11.0)                # anchors the tracker
+        assert status.soc_kwh == 11.0
+
+        status = await poll(0)                   # bogus midnight reading
+        assert status.soc_kwh is None
+        assert status.battery_discharge_today_kwh == 0.0
+        assert status.battery_charge_today_kwh == 0.0
+
+        status = await poll(10.7)                # real -0.3 kWh vs last good value
+        assert status.soc_kwh == 10.7
+        assert status.battery_discharge_today_kwh == pytest.approx(0.3)
+        assert status.battery_charge_today_kwh == 0.0
+
 
 # ----------------------------------------------------------------------
 # switch_mode — POST + verify

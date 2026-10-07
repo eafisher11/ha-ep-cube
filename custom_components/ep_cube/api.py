@@ -97,7 +97,7 @@ def _local_today() -> date:
 @dataclass(slots=True)
 class DeviceStatus:
     soc_pct: float
-    soc_kwh: float
+    soc_kwh: float | None   # None = cube sent 0 / no reading (sensor goes unavailable)
     capacity_kwh: float
     battery_power_w: float   # derived: solar + grid - load; >0 charging, <0 discharging
     grid_power_w: float      # >0 import, <0 export (verified 2026-05-22: cube returned gridPower:"-17" → -170 W matched EP Cube app's export reading)
@@ -174,6 +174,26 @@ def _kwh_str_to_float(value: Any) -> float:
     if value is None or value == "":
         return 0.0
     return float(value)
+
+
+def _battery_kwh_or_none(value: Any) -> float | None:
+    """Parse `batteryCurrentElectricity`, treating 0 / missing / garbage as
+    "no reading" (None) rather than 0.0 kWh.
+
+    The cloud briefly reports 0 (or drops the field) around its midnight
+    day-rollover. Passing that through as 0.0 made `battery_soc_kwh` plunge
+    to zero, and the charge/discharge delta-tracker then booked the whole
+    battery as discharged and recharged within two polls. A genuinely
+    empty pack still holds its reserve, so an exact 0 is never a real
+    reading worth recording.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        kwh = float(value)
+    except (TypeError, ValueError):
+        return None
+    return kwh if kwh > 0 else None
 
 
 def _truthy(value: Any) -> bool:
@@ -534,8 +554,17 @@ class EPCubeClient:
 
         # Update the client-side battery-flow accumulators before constructing
         # the DeviceStatus so the snapshot contains the freshly-updated values.
-        battery_kwh_now = _kwh_str_to_float(info.get("batteryCurrentElectricity"))
-        self._update_battery_flow(battery_kwh_now)
+        # A 0 / missing reading is treated as unavailable: skip the tracker
+        # entirely so the anchor stays on the last good value and no phantom
+        # discharge/charge pair gets booked (see _battery_kwh_or_none).
+        battery_kwh_now = _battery_kwh_or_none(info.get("batteryCurrentElectricity"))
+        if battery_kwh_now is not None:
+            self._update_battery_flow(battery_kwh_now)
+        else:
+            _LOGGER.debug(
+                "batteryCurrentElectricity=%r treated as unavailable",
+                info.get("batteryCurrentElectricity"),
+            )
 
         work_status = str(info.get("workStatus", mode.get("workStatus", "1")))
         operating_mode = WORK_STATUS_TO_OPERATING_MODE.get(work_status, "unknown")
@@ -547,7 +576,7 @@ class EPCubeClient:
 
         return DeviceStatus(
             soc_pct=float(info.get("batterySoc", 0)),
-            soc_kwh=_kwh_str_to_float(info.get("batteryCurrentElectricity")),
+            soc_kwh=battery_kwh_now,
             capacity_kwh=self._capacity_kwh,
             battery_power_w=battery_w,
             grid_power_w=grid_w,
