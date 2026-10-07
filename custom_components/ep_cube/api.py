@@ -476,6 +476,7 @@ class EPCubeClient:
             self._battery_charge_today_kwh = 0.0
             self._battery_discharge_today_kwh = 0.0
             self._battery_flow_last_reset = today
+            _LOGGER.info("Reset new date. Last Flow %.1f", self._battery_flow_last_kwh);
 
         if self._battery_flow_last_kwh is None:
             self._battery_flow_last_kwh = battery_now_kwh
@@ -490,7 +491,8 @@ class EPCubeClient:
             self._battery_flow_last_kwh = battery_now_kwh
         # else: jitter — leave anchor unchanged so a slow drift accumulates
         # toward the threshold across polls
-
+        
+        _LOGGER.info("Last Flow %.1f  Discharge Today: %.1f Charge Today: %.1f", self._battery_flow_last_kwh,self._battery_discharge_today_kwh,self._battery_charge_today_kwh);
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
