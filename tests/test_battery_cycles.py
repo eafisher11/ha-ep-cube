@@ -194,6 +194,7 @@ class TestSeedOrder:
         client.get_warranty = AsyncMock(return_value=None)
         client.get_firmware_info = AsyncMock(return_value=None)
         client.get_device_details = AsyncMock(return_value=None)
+        client.refresh_capacity = AsyncMock(return_value=True)
         coord = _coordinator(hass, client)
         coord._async_seed_lifetime = AsyncMock(side_effect=lambda: order.append("seed"))
         with patch("custom_components.ep_cube.coordinator.evaluate_predbat_priority_issue"):

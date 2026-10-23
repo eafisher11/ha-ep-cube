@@ -40,6 +40,7 @@ import aiohttp
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    EP_CUBE_GEN1_PACK_KWH,
     EP_CUBE_PACK_KWH,
     OPERATING_MODE_BACKUP,
     OPERATING_MODE_SELF_CONSUMPTION,
@@ -281,6 +282,46 @@ def _capacity_string_to_kwh(value: Any) -> float:
         return 0.0
 
 
+def _battery_module_count(device: dict[str, Any]) -> int:
+    """Count the battery modules in a deviceList row.
+
+    Gen 1 rows carry `snData`: one entry per inverter stack, each with a
+    `batterySnList` of module serials. `snItems` is NOT used — it also holds
+    the inverter and base serials. Serials are de-duplicated so a module
+    listed twice is only counted once."""
+    sn_data = device.get("snData")
+    if not isinstance(sn_data, list):
+        return 0
+    serials: set[str] = set()
+    for stack in sn_data:
+        if not isinstance(stack, dict):
+            continue
+        battery_sns = stack.get("batterySnList") or []
+        if isinstance(battery_sns, str):
+            battery_sns = battery_sns.split(",")
+        if not isinstance(battery_sns, list):
+            continue
+        serials.update(str(sn).strip() for sn in battery_sns if sn and str(sn).strip())
+    return len(serials)
+
+
+def device_capacity_kwh(device: dict[str, Any]) -> tuple[float, bool]:
+    """System capacity (kWh) for one deviceList row, plus whether it was
+    derived from Gen 1 module serials.
+
+    Prefers the cloud's own `systemCapacity` ("20.0kWh"). Gen 1 systems
+    don't send that field, so fall back to the number of battery serials in
+    `snData[].batterySnList` × EP_CUBE_GEN1_PACK_KWH (3.3 kWh). Returns
+    (0.0, False) if neither is available."""
+    capacity = _capacity_string_to_kwh(device.get("systemCapacity"))
+    if capacity > 0:
+        return capacity, False
+    modules = _battery_module_count(device)
+    if modules > 0:
+        return round(modules * EP_CUBE_GEN1_PACK_KWH, 1), True
+    return 0.0, False
+
+
 # ----------------------------------------------------------------------
 # Slot string + switchMode payload builder
 # ----------------------------------------------------------------------
@@ -517,6 +558,10 @@ class EPCubeClient:
         self._sg_sn = sg_sn
         self._bearer_token = bearer_token
         self._capacity_kwh = capacity_kwh
+        # True once deviceList shows a Gen 1 system (no systemCapacity; capacity
+        # counted from battery module serials). homeDeviceInfo's batteryPackNum
+        # assumes 5.0 kWh packs, so it must not overwrite a Gen 1 capacity.
+        self._gen1_capacity = False
         self._reauth_callback = reauth_callback
         # Battery flow delta-tracker state (Phase 3.5). Cube exposes
         # batteryCurrentElectricity (current stored energy, kWh) but not
@@ -572,24 +617,47 @@ class EPCubeClient:
                 "mobile-app login (or epcube-token.streamlit.app while the "
                 "in-integration captcha login is not yet implemented)"
             )
-        await self._refresh_capacity()
+        await self.refresh_capacity()
 
-    async def _refresh_capacity(self) -> None:
-        """Pull capacity from deviceList — also acts as auth probe."""
+    async def refresh_capacity(self) -> bool:
+        """Pull capacity from deviceList — also acts as auth probe.
+
+        Called by the coordinator at startup and daily, so an entry whose
+        cached capacity is stale (e.g. 0 kWh on a Gen 1 system set up before
+        Gen 1 support) gets corrected without re-adding the integration.
+        Returns True if deviceList was fetched, False if the call failed (the
+        current capacity is kept)."""
         try:
             devices = await self.get_device_list()
         except EPCubeError as err:
             _LOGGER.warning("capacity probe failed (%s); keeping configured value %.1f kWh",
                             err, self._capacity_kwh)
-            return
+            return False
         for entry in devices:
             row_dev_id = entry.get("devId") or entry.get("id")
             if str(row_dev_id) == self._dev_id or entry.get("sgSn") == self._sg_sn:
-                capacity = _capacity_string_to_kwh(entry.get("systemCapacity"))
+                capacity, gen1 = device_capacity_kwh(entry)
                 if capacity > 0:
                     self._capacity_kwh = capacity
-                    _LOGGER.debug("capacity from deviceList: %.1f kWh", capacity)
-                return
+                    self._gen1_capacity = gen1
+                    _LOGGER.debug(
+                        "capacity from deviceList: %.1f kWh (%s)",
+                        capacity,
+                        f"Gen 1: {_battery_module_count(entry)} modules × "
+                        f"{EP_CUBE_GEN1_PACK_KWH} kWh" if gen1 else "systemCapacity",
+                    )
+                else:
+                    _LOGGER.warning(
+                        "deviceList row for devId %s has neither systemCapacity nor "
+                        "battery serials in snData; keeping %.1f kWh",
+                        self._dev_id, self._capacity_kwh,
+                    )
+                return True
+        _LOGGER.warning(
+            "devId %s / sgSn %s not found in deviceList; keeping %.1f kWh",
+            self._dev_id, self._sg_sn, self._capacity_kwh,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Battery flow tracker
@@ -763,7 +831,7 @@ class EPCubeClient:
         )
 
         pack_num = info.get("batteryPackNum")
-        if isinstance(pack_num, int) and pack_num > 0:
+        if isinstance(pack_num, int) and pack_num > 0 and not self._gen1_capacity:
             self._capacity_kwh = pack_num * EP_CUBE_PACK_KWH
 
         # Update the client-side battery-flow accumulators before constructing

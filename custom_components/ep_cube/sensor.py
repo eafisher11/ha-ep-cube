@@ -211,8 +211,8 @@ SENSORS: tuple[EPCubeSensorDescription, ...] = (
         translation_key="battery_capacity_kwh",
         device_class=SensorDeviceClass.ENERGY_STORAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        # Always batteryPackNum × 5.0 (integer pack count, fixed pack
-        # capacity). 1dp matches battery_soc_kwh for dashboard consistency.
+        # batteryPackNum × 5.0, or for Gen 1 systems (no systemCapacity)
+        # battery module serials × 3.3. 1dp matches battery_soc_kwh.
         suggested_display_precision=1,
         # Static device spec, not a live metric — keep it off the primary
         # dashboard surface.

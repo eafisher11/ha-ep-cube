@@ -44,8 +44,8 @@ from .api import (
     AuthError,
     EPCubeClient,
     EPCubeError,
-    _capacity_string_to_kwh,
     build_dynamic_binding,
+    device_capacity_kwh,
 )
 from .captcha import CaptchaSolveError, LoginError, login as captcha_login
 from .const import (
@@ -450,7 +450,7 @@ class EPCubeConfigFlow(ConfigFlow, domain=DOMAIN):
                         else:
                             dev_id = str(chosen.get("devId") or chosen.get("id"))
                             sg_sn = str(chosen.get("sgSn"))
-                            capacity = _capacity_string_to_kwh(chosen.get("systemCapacity"))
+                            capacity, _ = device_capacity_kwh(chosen)
 
                             await self.async_set_unique_id(dev_id)
                             self._abort_if_unique_id_configured()

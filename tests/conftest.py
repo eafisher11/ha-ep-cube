@@ -57,6 +57,13 @@ def device_list() -> list[dict[str, Any]]:
     return _load("device_list.json")
 
 
+@pytest.fixture
+def device_list_gen1() -> list[dict[str, Any]]:
+    """deviceList from a Gen 1 (EP Cube 1.0) system: no systemCapacity, two
+    inverter stacks of 6 battery modules each under snData."""
+    return _load("device_list_gen1.json")
+
+
 # ----------------------------------------------------------------------
 # A pre-built fake client for tests that exercise sensor/coordinator/shim
 # code without mocking HTTP. Returns a MagicMock with AsyncMock methods.
@@ -109,6 +116,7 @@ def fake_client(get_switch_mode, device_list):
     )
 
     client.authenticate = AsyncMock(return_value=None)
+    client.refresh_capacity = AsyncMock(return_value=True)
     client.get_device_list = AsyncMock(return_value=device_list)
     client.get_switch_mode = AsyncMock(return_value=dict(get_switch_mode))
     client.switch_mode = AsyncMock(return_value=dict(get_switch_mode))

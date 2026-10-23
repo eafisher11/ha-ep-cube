@@ -217,6 +217,25 @@ class TestErrorMapping:
         assert result["data"][CONF_DEV_ID] == "9999"
         assert result["data"][CONF_CAPACITY_KWH] == 10.0
 
+    async def test_gen1_capacity_from_battery_serials(
+        self, hass, patch_captcha, device_list_gen1
+    ):
+        with patch(
+            "custom_components.ep_cube.config_flow.EPCubeClient.get_device_list",
+            new=AsyncMock(return_value=device_list_gen1),
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": config_entries.SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {CONF_USERNAME: "u@e.com", CONF_PASSWORD: "x", CONF_REGION: REGION_EU},
+            )
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_DEV_ID] == "1234"
+        # 12 battery serials × 3.3 kWh
+        assert result["data"][CONF_CAPACITY_KWH] == 39.6
+
 
 # ----------------------------------------------------------------------
 # Unique-id guard — don't double-add the same device.

@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.ep_cube.api import (
     _battery_kwh_or_none,
+    _battery_module_count,
     _capacity_string_to_kwh,
     _kwh_str_to_float,
     _power_to_w,
@@ -17,6 +18,7 @@ from custom_components.ep_cube.api import (
     _values_equal,
     _verify_write,
     WriteVerificationError,
+    device_capacity_kwh,
 )
 from custom_components.ep_cube.const import (
     OPERATING_MODE_BACKUP,
@@ -92,6 +94,45 @@ class TestCapacityStringToKwh:
     )
     def test_parses(self, wire, expected):
         assert _capacity_string_to_kwh(wire) == expected
+
+
+class TestDeviceCapacityKwh:
+    """Gen 1 rows omit `systemCapacity`; capacity = battery serials × 3.3."""
+
+    def test_gen1_counts_battery_serials(self, device_list_gen1):
+        row = device_list_gen1[0]
+        assert _battery_module_count(row) == 12
+        assert device_capacity_kwh(row) == (39.6, True)
+
+    def test_system_capacity_wins_when_present(self, device_list):
+        assert device_capacity_kwh(device_list[0]) == (20.0, False)
+
+    def test_system_capacity_wins_over_sn_data(self, device_list_gen1):
+        row = {**device_list_gen1[0], "systemCapacity": "30.0kWh"}
+        assert device_capacity_kwh(row) == (30.0, False)
+
+    def test_sn_items_inverters_and_bases_not_counted(self):
+        # Only batterySnList entries are modules; snItems also holds the
+        # inverter and base serials.
+        row = {"snItems": "a,b,c,d", "snData": [{"inverterSn": "a", "baseSn": "b",
+                                               "batterySnList": ["c", "d"]}]}
+        assert device_capacity_kwh(row) == (6.6, True)
+
+    def test_duplicate_serials_counted_once(self):
+        row = {"snData": [{"batterySnList": ["x", "y"]}, {"batterySnList": ["y", " "]}]}
+        assert _battery_module_count(row) == 2
+
+    def test_comma_string_battery_list(self):
+        row = {"snData": [{"batterySnList": "x,y,z"}]}
+        assert device_capacity_kwh(row) == (9.9, True)
+
+    @pytest.mark.parametrize(
+        "row",
+        [{}, {"snData": None}, {"snData": "junk"}, {"snData": [None, {}]},
+         {"snData": [{"batterySnList": []}]}, {"systemCapacity": "", "snData": []}],
+    )
+    def test_nothing_usable_is_zero(self, row):
+        assert device_capacity_kwh(row) == (0.0, False)
 
 
 class TestValuesEqual:

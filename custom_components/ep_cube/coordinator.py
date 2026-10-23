@@ -96,6 +96,9 @@ class EPCubeCoordinator(DataUpdateCoordinator[DeviceStatus]):
         # Model and serial numbers (userDeviceInfo), same cadence and rules.
         self._details: DeviceDetails | None = None
         self._details_fetched: datetime | None = None
+        # System capacity from deviceList (systemCapacity, or Gen 1 battery
+        # serials × 3.3 kWh). Refreshed daily; a failed fetch retries next poll.
+        self._capacity_fetched: datetime | None = None
         self._lifetime_seed_attempts = 0
 
     def _battery_flow_data(self) -> dict:
@@ -162,6 +165,13 @@ class EPCubeCoordinator(DataUpdateCoordinator[DeviceStatus]):
     def firmware(self) -> FirmwareInfo | None:
         """The cube's firmware versions, or None until the cloud has returned them."""
         return self._firmware
+
+    async def _async_refresh_capacity(self) -> None:
+        now = dt_util.utcnow()
+        if self._capacity_fetched is not None and now - self._capacity_fetched < WARRANTY_REFRESH:
+            return
+        if await self.client.refresh_capacity():
+            self._capacity_fetched = now
 
     async def _async_refresh_firmware(self) -> None:
         now = dt_util.utcnow()
@@ -232,6 +242,9 @@ class EPCubeCoordinator(DataUpdateCoordinator[DeviceStatus]):
         # already carries it (otherwise the lifetime and cycles sensors read 0
         # until the second poll).
         await self._async_seed_lifetime()
+        # Before get_status, so the first status already has the capacity and
+        # a Gen 1 capacity is known before batteryPackNum is considered.
+        await self._async_refresh_capacity()
         try:
             status = await self.client.get_status()
         except _TRANSIENT_ERRORS as err:

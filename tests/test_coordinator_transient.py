@@ -48,6 +48,7 @@ def _make(hass, outcomes):
     client.get_warranty = AsyncMock(return_value=None)
     client.get_firmware_info = AsyncMock(return_value=None)
     client.get_device_details = AsyncMock(return_value=None)
+    client.refresh_capacity = AsyncMock(return_value=True)
     client.lifetime_known = True
     entry = MagicMock()
     entry.entry_id = "test_entry"
